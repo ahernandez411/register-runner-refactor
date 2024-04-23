@@ -110,8 +110,10 @@ class ActionInputs:
 
         if not self.inputs_image or self.inputs_image.strip() == "NA" or self.inputs_image.strip() == "":
             instance.runner_image = f"{self.needs_set_vars_outputs_registry}/{self.inputs_organization}/{self.steps_get_runner_name_outputs_runner_name}"
+            tag = self.inputs_image_sha if self.inputs_image_sha and self.inputs_image_sha.strip() != "NA" else self.inputs_image_tag
+
             instance.annotations = {
-                "runnerImage": f"{self.inputs_organization}/{self.steps_get_runner_name_outputs_runner_name}:{self.inputs_image_sha}"
+                "runnerImage": f"{self.inputs_organization}/{self.steps_get_runner_name_outputs_runner_name}:{tag}"
             }
         else:
             instance.runner_image = f"{self.needs_set_vars_outputs_registry}/{self.inputs_image}"
