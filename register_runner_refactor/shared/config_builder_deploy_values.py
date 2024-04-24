@@ -13,15 +13,13 @@ class ConfigBuilderDeployValues:
         self.default_spec_containers_requests_cpu = "100m"
         self.default_spec_containers_requests_memory = "128Mi"
 
-        self.options_container_mode = [
-            "none",
-            "dind",
-            "kubernetes",
-        ]
+        self.option_container_mode_none = "none"
+        self.option_container_mode_dind = "dind"
+        self.option_container_mode_kubernetes = "kubernetes"
 
         self.runner_group = ""
-        self.runner_request_cpu = ""
-        self.runner_request_memory = ""
+        self.runner_request_cpu = "100m"
+        self.runner_request_memory = "200Mi"
         self.runner_max_cpu = ""
         self.runner_max_memory = ""
         self.runner_agent_pool = ""
@@ -43,8 +41,14 @@ class ConfigBuilderDeployValues:
         self.container_mode = ""
         self.kubernetes_mode_volume_size = ""
 
-        self.spec_container_name = ""
-        self.spec_container_image = ""
+        self.listener_container_name = "listener"
+        self.runner_container_name = "runner"
+
+        self.listener_requests_cpu = "100m"
+        self.listener_requests_memory = "128Mi"
+
+        self.runner_container_image = ""
+
 
     def _combine_dicts(self, dict1: dict, dict2: dict) -> dict:
         combined = {**dict1, **dict2}
@@ -65,6 +69,11 @@ class ConfigBuilderDeployValues:
         runner_annotations = self._combine_dicts(runner_prometheus_annotations, self.annotations)
         listener_annotations = self._combine_dicts(prometheus_annotations, self.annotations)
 
+        if "sha256" in self.runner_sha.lower():
+            self.runner_container_image = f"{self.runner_image}@{self.runner_sha}"
+        else:
+            self.runner_container_image = f"{self.runner_image}:{self.runner_tag}"
+
         helm_values = {
             "githubConfigUrl": self.github_config_url,
             "githubConfigSecret": self.github_app_secret_name,
@@ -83,17 +92,15 @@ class ConfigBuilderDeployValues:
                 "spec": {
                     "containers": [
                         {
-                            "name": self.spec_container_name,
-                            "image": self.spec_container_image,
-                            "command": self.runner_command,
+                            "name": self.listener_container_name,
                             "resources": {
                                 "limits": {
-                                    "cpu": self.runner_max_cpu,
-                                    "memory": self.runner_max_memory,
+                                    "cpu": self.listener_max_cpu,
+                                    "memory": self.listener_max_memory,
                                 },
                                 "requests": {
-                                    "cpu": self.runner_request_cpu,
-                                    "memory": self.runner_request_memory,
+                                    "cpu": self.listener_requests_cpu,
+                                    "memory": self.listener_requests_memory,
                                 }
                             }
                         }
@@ -111,11 +118,13 @@ class ConfigBuilderDeployValues:
                 "spec": {
                     "containers": [
                         {
-                            "name": self.spec_container_name,
+                            "command": self.runner_command,
+                            "name": self.runner_container_name,
+                            "image": self.runner_container_image,
                             "resources": {
                                 "limits": {
-                                    "cpu": self.listener_max_cpu,
-                                    "memory": self.listener_max_memory,
+                                    "cpu": self.runner_max_cpu,
+                                    "memory": self.runner_max_memory,
                                 },
                                 "requests": {
                                     "cpu": self.runner_request_cpu,
@@ -131,6 +140,34 @@ class ConfigBuilderDeployValues:
             }
         }
 
+        if self.container_mode == self.option_container_mode_dind:
+            helm_values["containerMode"] = {
+                "type": self.option_container_mode_dind,
+            }
 
+        elif self.container_mode == self.option_container_mode_kubernetes:
+            helm_values["containerMode"] = {
+                "type": self.option_container_mode_kubernetes,
+                "kubernetesModeWorkVolumeClaim" : {
+                    "accessModes": [ "ReadWriteOnce" ],
+                    "storageClassName": "dynamic-blob-storage",
+                    "resources": {
+                        "requests": {
+                            "storage": self.kubernetes_mode_volume_size
+                        }
+                    }
+                },
+                "kubernetesModeServiceAccount": {
+                    "annotations": {
+                        "name": "gha-runner-kb-mode-sa"
+                    }
+                }
+            }
+            helm_values["template"]["spec"]["containers"][0]["env"] = [
+                {
+                    "name": "ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER",
+                    "value": "false"
+                }
+            ]
 
         return helm_values

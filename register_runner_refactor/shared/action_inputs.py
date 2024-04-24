@@ -85,7 +85,7 @@ class ActionInputs:
 
         if self.inputs_platform == self.option_inputs_platform_linux:
             instance.runner_request_cpu = "100m"
-            instance.runner_request_cpu = "200Mi"
+            instance.runner_request_memory = "200Mi"
             instance.runner_max_cpu = "1500m"
             instance.runner_max_memory = "3Gi"
             instance.runner_agent_pool = self.option_inputs_platform_linux
@@ -103,10 +103,11 @@ class ActionInputs:
                 "/c",
                 "\\home\\runner\\run.cmd"
             ]
-            instance.labels = {
-                "org": self.inputs_organization,
-                "region": "na27" if "-secondary" in self.inputs_environment else "na26"
-            }
+
+        instance.labels = {
+            "org": self.inputs_organization,
+            "region": "na27" if "-secondary" in self.inputs_environment else "na26"
+        }
 
         if not self.inputs_image or self.inputs_image.strip() == "NA" or self.inputs_image.strip() == "":
             instance.runner_image = f"{self.needs_set_vars_outputs_registry}/{self.inputs_organization}/{self.steps_get_runner_name_outputs_runner_name}"

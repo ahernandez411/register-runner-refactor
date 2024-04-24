@@ -44,7 +44,7 @@ class Main:
         github_ref_name = "main"
         github_sha = "1d56d71bcf81ae3b85a63281d31f86501185d24e"
 
-        registry = "dynamicrunnersprodcr"
+        registry = "dynamicrunnersprodcr.azurecr.io"
         runner_full_name = "aric-dotnet"
         runner_group = "dynamic-runners"
         runner_name = "aric-dotnet"
