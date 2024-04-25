@@ -1,7 +1,9 @@
 import json
+import os
 
 from shared.action_inputs import ActionInputs
 from shared.config_builder_deploy_values import ConfigBuilderDeployValues
+from shared.helm_deploy_values import HelmDeployValues
 
 class Main:
     def __init__(self) -> None:
@@ -78,6 +80,21 @@ class Main:
 
         example_output = self._load_example_output()
         self._save_results("example-output", example_output)
+
+        os.environ["CONTAINER_MODE"] = inputs_container_mode
+        os.environ["TARGET_ENVIRONMENT"] = inputs_environment
+        os.environ["IMAGE"] = inputs_image
+        os.environ["IMAGE_SHA"] = inputs_image_sha
+        os.environ["IMAGE_TAG"] = inputs_image_tag
+        os.environ["ORGANIZATION"] = inputs_organization
+        os.environ["PLATFORM"] = inputs_platform
+        os.environ["REGISTRY"] = registry
+        os.environ["RUNNER_GROUP"] = runner_group
+        os.environ["RUNNER_NAME"] = runner_name
+
+        helm_values = HelmDeployValues()
+        helm_json = helm_values.create_helm_json()
+        self._save_results("helm-values", helm_json)
 
 
     def _save_results(self, name: str, results: dict):
