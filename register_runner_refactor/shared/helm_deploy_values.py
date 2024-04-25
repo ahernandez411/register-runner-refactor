@@ -25,12 +25,14 @@ class HelmDeployValues:
         self.github_config_url = f"https://github.com/{inputs.organization}"
         self.runner_group = inputs.runner_group
 
-        self.listener_metadata_labels = self._setup_listener_metadata_labels(inputs)
-        self.runner_metadata_labels = self._setup_runner_metadata_labels(inputs)
-        self.min_runners, self.max_runners = self._setup_min_max_runners(inputs)
+        region = self._get_region(inputs)
+        self.listener_metadata_labels = self._get_listener_metadata_labels(inputs, region)
+        self.runner_metadata_labels = self._get_runner_metadata_labels(inputs, region)
 
-        self.annotation_runner_image = self._setup_annotation_runner_image_values(inputs)
-        self.runner_image = self._setup_runner_image_values(inputs)
+        self.min_runners, self.max_runners = self._get_min_max_runners(inputs)
+
+        self.annotation_runner_image = self._get_annotation_runner_image_values(inputs)
+        self.runner_image = self._get_runner_image_values(inputs)
 
         # Assignments from environmental variables and other values
         prometheus_annotations = {
@@ -38,7 +40,8 @@ class HelmDeployValues:
             "prometheus.io/port": "8080",
             "prometheus.io/path": "/metrics",
         }
-        self.listener_metadata_annotations = self._setup_listener_metadata_annotations(inputs, prometheus_annotations, self.annotation_runner_image)
+        self.listener_metadata_annotations = self._get_listener_metadata_annotations(inputs, prometheus_annotations, self.annotation_runner_image)
+        self.runner_spec_containers_image = self._get_runner_spec_container_image(inputs, self.runner_image)
 
         self.runner_metadata_annotations = {}
         self.runner_spec_containers_command = None
@@ -47,25 +50,23 @@ class HelmDeployValues:
         self.runner_spec_containers_resources_requests_cpu = None
         self.runner_spec_containers_resources_requests_memory = None
         self.runner_spec_node_selector_agentpool = None
-        self._setup_container_resources(inputs, prometheus_annotations, self.annotation_runner_image)
-
-        self.runner_spec_containers_image = self._setup_runner_spec_container_image(inputs, self.runner_image)
+        self._get_container_resources(inputs, prometheus_annotations, self.annotation_runner_image)
 
 
-    def _setup_runner_metadata_labels(self, inputs: WorkflowInputs) -> dict:
+    def _get_runner_metadata_labels(self, inputs: WorkflowInputs, region: str) -> dict:
         # Basic Assignment from environment variables
         runner_metadata_labels = {
             "org": inputs.organization,
-            "region": self._get_region(inputs)
+            "region": region
         }
         return runner_metadata_labels
 
 
-    def _setup_listener_metadata_labels(self, inputs: WorkflowInputs) -> dict:
+    def _get_listener_metadata_labels(self, inputs: WorkflowInputs, region: str) -> dict:
         # Basic Assignment from environment variables
         listener_metadata_labels = {
             "org": inputs.organization,
-            "region": self._get_region(inputs)
+            "region": region
         }
         return listener_metadata_labels
 
@@ -74,7 +75,7 @@ class HelmDeployValues:
         return "na27" if "-secondary" in inputs.environment else "na26"
 
 
-    def _setup_min_max_runners(self, inputs: WorkflowInputs) -> Tuple[int, int]:
+    def _get_min_max_runners(self, inputs: WorkflowInputs) -> Tuple[int, int]:
         runners_with_large_inputs = [
             "im-linux",
             "im-ghas-linux",
@@ -91,7 +92,7 @@ class HelmDeployValues:
         return min_runners, max_runners
 
 
-    def _setup_annotation_runner_image_values(self, inputs: WorkflowInputs) -> str:
+    def _get_annotation_runner_image_values(self, inputs: WorkflowInputs) -> str:
         annotation_runner_image = None
         if (
             not inputs.image or
@@ -106,7 +107,7 @@ class HelmDeployValues:
         return annotation_runner_image
 
 
-    def _setup_runner_image_values(self, inputs: WorkflowInputs) -> str:
+    def _get_runner_image_values(self, inputs: WorkflowInputs) -> str:
         runner_image = None
         if (
             not inputs.image or
@@ -120,13 +121,13 @@ class HelmDeployValues:
         return runner_image
 
 
-    def _setup_listener_metadata_annotations(self, inputs: WorkflowInputs, prometheus_annotations: dict, annotation_runner_image: str) -> dict:
+    def _get_listener_metadata_annotations(self, inputs: WorkflowInputs, prometheus_annotations: dict, annotation_runner_image: str) -> dict:
         listener_metadata_annotations = copy.copy(prometheus_annotations)
         listener_metadata_annotations["runnerImage"] = annotation_runner_image
         return listener_metadata_annotations
 
 
-    def _setup_container_resources(self, inputs: WorkflowInputs, prometheus_annotations, annotation_runner_image: str):
+    def _get_container_resources(self, inputs: WorkflowInputs, prometheus_annotations, annotation_runner_image: str):
         if inputs.platform == "linux":
             self.runner_metadata_annotations["runnerImage"] = annotation_runner_image
             self.runner_spec_containers_command = [
@@ -153,7 +154,7 @@ class HelmDeployValues:
             self.runner_spec_node_selector_agentpool = "windows"
 
 
-    def _setup_runner_spec_container_image(self, inputs: WorkflowInputs, runner_image: str) -> str:
+    def _get_runner_spec_container_image(self, inputs: WorkflowInputs, runner_image: str) -> str:
         runner_spec_containers_image = None
         if "sha256" in inputs.image_sha.lower():
             runner_spec_containers_image = f"{runner_image}@{inputs.image_sha}"
@@ -229,7 +230,12 @@ class HelmDeployValues:
                 }
             }
         }
+        self._add_values_for_container_mode(helm_json)
 
+        return helm_json
+
+
+    def _add_values_for_container_mode(self, helm_json: dict) -> dict:
         if self.container_mode == "dind":
             helm_json["containerMode"] = {
                 "type": "dind",
