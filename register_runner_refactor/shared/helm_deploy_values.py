@@ -1,16 +1,10 @@
 import copy
-import os
 
-from shared.static_values import StaticValues
+from shared.workflow_inputs import WorkflowInputs
+from typing import Tuple
 
 class HelmDeployValues:
     def __init__(self) -> None:
-        self._prometheus_annotations = {
-            "prometheus.io/scrape": "true",
-            "prometheus.io/port": "8080",
-            "prometheus.io/path": "/metrics",
-        }
-
         # hard-coded assignments
         self.github_app_secret_name = "dynamic-runners-gh-app"
         self.controller_service_account_name = "im-arc-cntlr-gha-rs-controller"
@@ -22,117 +16,119 @@ class HelmDeployValues:
         self.listener_spec_containers_resources_requests_memory = "128Mi"
         self.listener_spec_node_selector_agentpool = "mgmt"
         self.runner_spec_containers_name = "runner"
-        self.kubernetes_resources_requests_storage_size = "1Gi"
+        self.container_kubernetes_resources_requests_storage_size = "1Gi"
 
-        self.github_config_url = f"https://github.com/{self._input_organization}"
-        self.max_runners = None
-        self.min_runners = None
-        self.runner_group = self._input_runner_group
+        # Asssignments from environment variables
+        inputs = WorkflowInputs()
 
-        self.listener_metadata_annotations = {}
-        self.listener_metadata_labels = None
-        self.runner_metadata_labels = None
+        self.container_mode = inputs.container_mode
+        self.github_config_url = f"https://github.com/{inputs.organization}"
+        self.runner_group = inputs.runner_group
+
+        self.listener_metadata_labels = self._setup_listener_metadata_labels(inputs)
+        self.runner_metadata_labels = self._setup_runner_metadata_labels(inputs)
+        self.min_runners, self.max_runners = self._setup_min_max_runners(inputs)
+
+        self.annotation_runner_image = self._setup_annotation_runner_image_values(inputs)
+        self.runner_image = self._setup_runner_image_values(inputs)
+
+        # Assignments from environmental variables and other values
+        prometheus_annotations = {
+            "prometheus.io/scrape": "true",
+            "prometheus.io/port": "8080",
+            "prometheus.io/path": "/metrics",
+        }
+        self.listener_metadata_annotations = self._setup_listener_metadata_annotations(inputs, prometheus_annotations, self.annotation_runner_image)
+
         self.runner_metadata_annotations = {}
         self.runner_spec_containers_command = None
-        self.runner_spec_containers_image = None
         self.runner_spec_containers_resources_limits_cpu = None
         self.runner_spec_containers_resources_limits_memory = None
         self.runner_spec_containers_resources_requests_cpu = None
         self.runner_spec_containers_resources_requests_memory = None
         self.runner_spec_node_selector_agentpool = None
-        self.annotation_runner_image = None
+        self._setup_container_resources(inputs, prometheus_annotations, self.annotation_runner_image)
 
-        self._setup_metadata_labels()
-        self._setup_min_max_runners()
-        self._setup_runner_image_values()
-        self._setup_container_resources()
-        self._setup_runner_spec_container_image()
-
-    @property
-    def _input_runner_name(self):
-        return os.getenv("RUNNER_NAME", None)
-
-    @property
-    def _input_runner_group(self):
-        return os.getenv("RUNNER_GROUP", None)
-
-    @property
-    def _input_registry(self) -> str:
-        return os.getenv("REGISTRY", None)
-
-    @property
-    def _input_platform(self) -> str:
-        return os.getenv("PLATFORM", StaticValues.PLATFORM_LINUX)
-
-    @property
-    def _input_organization(self) -> str:
-        return os.getenv("ORGANIZATION", None)
-
-    @property
-    def _input_image_tag(self) -> str:
-        return os.getenv("IMAGE_TAG", None)
-
-    @property
-    def _input_image_sha(self):
-        return os.getenv("IMAGE_SHA", None)
-
-    @property
-    def _input_image(self) -> str:
-        input_image = os.getenv("IMAGE", None)
-        return input_image
-
-    @property
-    def _input_environment(self) -> str:
-        input_environment = os.getenv("TARGET_ENVIRONMENT", StaticValues.ENV_PROD).lower()
-        return input_environment
-
-    @property
-    def _input_container_mode(self) -> str:
-        input_container_mode = os.getenv("CONTAINER_MODE", StaticValues.CONTAINER_MODE_NONE).lower()
-        return input_container_mode
+        self.runner_spec_containers_image = self._setup_runner_spec_container_image(inputs, self.runner_image)
 
 
-    def _setup_metadata_labels(self) -> None:
+    def _setup_runner_metadata_labels(self, inputs: WorkflowInputs) -> dict:
         # Basic Assignment from environment variables
-        labels = {
-            "org": self._input_organization,
-            "region": "na27" if "-secondary" in self._input_environment else "na26"
+        runner_metadata_labels = {
+            "org": inputs.organization,
+            "region": self._get_region(inputs)
         }
-        self.listener_metadata_labels = copy.copy(labels)
-        self.runner_metadata_labels = copy.copy(labels)
+        return runner_metadata_labels
 
 
-    def _setup_min_max_runners(self):
+    def _setup_listener_metadata_labels(self, inputs: WorkflowInputs) -> dict:
+        # Basic Assignment from environment variables
+        listener_metadata_labels = {
+            "org": inputs.organization,
+            "region": self._get_region(inputs)
+        }
+        return listener_metadata_labels
+
+
+    def _get_region(self, inputs: WorkflowInputs) -> str:
+        return "na27" if "-secondary" in inputs.environment else "na26"
+
+
+    def _setup_min_max_runners(self, inputs: WorkflowInputs) -> Tuple[int, int]:
+        runners_with_large_inputs = [
+            "im-linux",
+            "im-ghas-linux",
+            "im-image-builder"
+        ]
+
         # More Complex Assignments
-        if self._input_runner_name in StaticValues.RUNNERS_WITH_LARGE_LIMITS:
-            self.max_runners = 30
-            self.min_runners = 1
-        else:
-            self.max_runners = 10
-            self.min_runners = 0
+        max_runners = 10
+        min_runners = 0
+        if inputs.runner_name in runners_with_large_inputs:
+            max_runners = 30
+            min_runners = 1
+
+        return min_runners, max_runners
 
 
-    def _setup_runner_image_values(self):
+    def _setup_annotation_runner_image_values(self, inputs: WorkflowInputs) -> str:
+        annotation_runner_image = None
         if (
-            not self._input_image or
-            self._input_image.strip() == StaticValues.VALUE_NA or
-            self._input_image.strip() == ""
+            not inputs.image or
+            inputs.image.strip().lower() == "na" or
+            inputs.image.strip() == ""
         ):
-            tag = self._input_image_sha if self._input_image_sha and self._input_image_sha.strip() != StaticValues.VALUE_NA else self._input_image_tag
-
-            self.annotation_runner_image = f"{self._input_organization}/{self._input_runner_name}:{tag}"
-            self.runner_image = f"{self._input_registry}/{self._input_organization}/{self._input_runner_name}"
+            tag = inputs.image_sha if inputs.image_sha and inputs.image_sha.strip().lower() != "na" else inputs.image_tag
+            annotation_runner_image = f"{inputs.organization}/{inputs.runner_name}:{tag}"
         else:
-            self.annotation_runner_image = f"{self._input_runner_name}:{self._input_image_tag}"
-            self.runner_image = f"{self._input_registry}/{self._input_image}"
+            annotation_runner_image = f"{inputs.runner_name}:{inputs.image_tag}"
+
+        return annotation_runner_image
 
 
-    def _setup_container_resources(self):
-        self.listener_metadata_annotations = copy.copy(self._prometheus_annotations)
-        self.listener_metadata_annotations["runnerImage"] = self.annotation_runner_image
+    def _setup_runner_image_values(self, inputs: WorkflowInputs) -> str:
+        runner_image = None
+        if (
+            not inputs.image or
+            inputs.image.strip().lower() == "na" or
+            inputs.image.strip() == ""
+        ):
+            runner_image = f"{inputs.registry}/{inputs.organization}/{inputs.runner_name}"
+        else:
+            runner_image = f"{inputs.registry}/{inputs.image}"
 
-        if self._input_platform == StaticValues.PLATFORM_LINUX:
-            self.runner_metadata_annotations["runnerImage"] = self.annotation_runner_image
+        return runner_image
+
+
+    def _setup_listener_metadata_annotations(self, inputs: WorkflowInputs, prometheus_annotations: dict, annotation_runner_image: str) -> dict:
+        listener_metadata_annotations = copy.copy(prometheus_annotations)
+        listener_metadata_annotations["runnerImage"] = annotation_runner_image
+        return listener_metadata_annotations
+
+
+    def _setup_container_resources(self, inputs: WorkflowInputs, prometheus_annotations, annotation_runner_image: str):
+        if inputs.platform == "linux":
+            self.runner_metadata_annotations["runnerImage"] = annotation_runner_image
             self.runner_spec_containers_command = [
                 "/home/runner/run.sh"
             ]
@@ -140,11 +136,11 @@ class HelmDeployValues:
             self.runner_spec_containers_resources_limits_memory = "3Gi"
             self.runner_spec_containers_resources_requests_cpu = "100m"
             self.runner_spec_containers_resources_requests_memory = "200Mi"
-            self.runner_spec_node_selector_agentpool = StaticValues.PLATFORM_LINUX
+            self.runner_spec_node_selector_agentpool = "linux"
 
         else:
-            self.runner_metadata_annotations = copy.copy(self._prometheus_annotations)
-            self.runner_metadata_annotations["runnerImage"] = self.annotation_runner_image
+            self.runner_metadata_annotations = copy.copy(prometheus_annotations)
+            self.runner_metadata_annotations["runnerImage"] = annotation_runner_image
             self.runner_spec_containers_command = [
                 "cmd.exe",
                 "/c",
@@ -154,14 +150,17 @@ class HelmDeployValues:
             self.runner_spec_containers_resources_limits_memory = "6Gi"
             self.runner_spec_containers_resources_requests_cpu = "500m"
             self.runner_spec_containers_resources_requests_memory = "2Gi"
-            self.runner_spec_node_selector_agentpool = StaticValues.PLATFORM_WINDOWS
+            self.runner_spec_node_selector_agentpool = "windows"
 
 
-    def _setup_runner_spec_container_image(self):
-        if "sha256" in self._input_image_sha.lower():
-            self.runner_spec_containers_image = f"{self.runner_image}@{self._input_image_sha}"
+    def _setup_runner_spec_container_image(self, inputs: WorkflowInputs, runner_image: str) -> str:
+        runner_spec_containers_image = None
+        if "sha256" in inputs.image_sha.lower():
+            runner_spec_containers_image = f"{runner_image}@{inputs.image_sha}"
         else:
-            self.runner_spec_containers_image = f"{self.runner_image}:{self._input_image_tag}"
+            runner_spec_containers_image = f"{runner_image}:{inputs.image_tag}"
+
+        return runner_spec_containers_image
 
 
     def create_helm_json(self) -> dict:
@@ -231,20 +230,20 @@ class HelmDeployValues:
             }
         }
 
-        if self._input_container_mode == StaticValues.CONTAINER_MODE_DIND:
+        if self.container_mode == "dind":
             helm_json["containerMode"] = {
-                "type": StaticValues.CONTAINER_MODE_DIND,
+                "type": "dind",
             }
 
-        elif self._input_container_mode == StaticValues.CONTAINER_MODE_KUBERNETES:
+        elif self.container_mode == "kubernetes":
             helm_json["containerMode"] = {
-                "type": StaticValues.CONTAINER_MODE_KUBERNETES,
+                "type": "kubernetes",
                 "kubernetesModeWorkVolumeClaim" : {
                     "accessModes": [ "ReadWriteOnce" ],
                     "storageClassName": "dynamic-blob-storage",
                     "resources": {
                         "requests": {
-                            "storage": self.kubernetes_resources_requests_storage_size
+                            "storage": self.container_kubernetes_resources_requests_storage_size
                         }
                     }
                 },
